@@ -1,37 +1,60 @@
-﻿# Lol Infinite Vision
+# Lol Infinite Vision
 
-这是一个为《英雄联盟》(League of Legends) 设计的无限视野修改工具，通过DLL注入的方式实现修改游戏内视野距离的功能。
+这个项目现在只保留“定位时间特征码”的逻辑。
 
-## 功能特点
+DLL 注入后会执行一次最小化流程：
 
-- **无限视野**: 修改游戏内存中的视野距离限制
-- **热键支持**:
-  - `Alt + F4`: 立即退出程序
-  - `Ctrl + S`: 保存当前视野距离设置
-- **配置管理**: 支持从配置文件读取和保存设置
-- **实时调整**: 通过鼠标滚轮可实时读取当前视野值
+1. 获取当前模块的地址范围
+2. 扫描 `TIME_SIGNATURE_CODE`
+3. 读取相对偏移并计算真正的时间基址
+4. 读取当前游戏时间，直到读到大于 `0` 的值
 
-## 技术原理
+## 构建方式
 
-### 核心机制
+项目使用 CMake 构建。
 
-1. **特征码定位**: 使用签名扫描定位游戏内存中的关键代码位置
-2. **内存读写**: 直接读写游戏进程内存来修改视野值
-3. **窗口消息拦截**: 子类化游戏窗口以捕获键盘和鼠标输入
-4. **定时任务**: 使用线程池定时器执行初始化任务
+```powershell
+cmake --preset vs2026-x64-debug
+cmake --build --preset build-x64-debug
+```
 
+也支持单配置的 Ninja 构建：
 
+```powershell
+cmake --preset ninja-release
+cmake --build --preset build-ninja-release
+```
 
-## 防回弹机制 
+## 当前保留内容
 
-该项目有防回弹功能，确保视野修改的稳定性和持久性：
+- 时间特征码扫描
+- 模块地址范围获取
+- 进程内存读取
+- 可选控制台日志输出
 
-### 1. 持续写入机制
-- 当检测到视野值发生变化时，立即重新写入目标值 distanceValue
-### 2. 延迟同步策略
-- 鼠标滚轮操作后延迟100ms读取当前值
-- _避免与游戏自身视距调整逻辑产生冲突_
+## 配置文件
 
-## 参考项目
-- [lolTelescope](https://github.com/kapbale/lolTelescope)
+根目录提供默认配置文件 `LolInfiniteVision.ini`：
 
+```ini
+[Config]
+console=0
+```
+
+- `console=1`：DLL 加载后打开控制台
+- `console=0`：DLL 加载后不打开控制台
+
+## 目录结构
+
+- `src/`: 所有 C++ 源码和头文件
+- `build/`: CMake 构建输出目录
+- 根目录: 仓库级配置文件，例如 `CMakeLists.txt`、`CMakePresets.json`、`.gitignore`
+
+## 已移除内容
+
+- 视距修改
+- RCX 定位
+- 窗口消息接管
+- 热键处理
+- 配置保存
+- 鼠标滚轮同步
