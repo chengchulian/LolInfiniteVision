@@ -2,15 +2,93 @@
 
 #include "Constant.h"
 #include "GameTime.h"
+#include "Memory.h"
 #include "Method.h"
 
 namespace
 {
     PTP_TIMER g_timer = nullptr;
+    bool g_enableVisionSwitch = true;
+    bool g_enableAttackRange = true;
+
+    void PatchSignatureOpcode(
+        const gametime::ReadyContext& context,
+        const char* signatureCode,
+        BYTE expectedOpcode,
+        BYTE targetOpcode,
+        const wchar_t* signatureName)
+    {
+        const DWORD64 signatureAddress = method::LocateSignature(
+            context.process,
+            signatureCode,
+            context.moduleStartAddress,
+            context.moduleEndAddress,
+            0);
+
+        if (!signatureAddress)
+        {
+            method::PrintToConsole(L"[warn] %ls not found", signatureName);
+            return;
+        }
+
+        method::PrintToConsole(L"[info] %ls address = 0x%llX", signatureName, signatureAddress);
+
+        BYTE opcode = 0;
+        if (!memory::Read(context.process, signatureAddress, opcode))
+        {
+            method::PrintToConsole(L"[warn] failed to read %ls opcode", signatureName);
+            return;
+        }
+
+        if (opcode != expectedOpcode)
+        {
+            method::PrintToConsole(L"[info] %ls opcode = 0x%02X, skip patch", signatureName, opcode);
+            return;
+        }
+
+        if (!memory::Write(context.process, signatureAddress, targetOpcode))
+        {
+            method::PrintToConsole(L"[warn] failed to patch %ls opcode", signatureName);
+            return;
+        }
+
+        method::PrintToConsole(L"[info] patched %ls opcode: 0x%02X -> 0x%02X",
+            signatureName,
+            opcode,
+            targetOpcode);
+    }
 
     void HandleGameTimeReady(const gametime::ReadyContext& context)
     {
         method::PrintToConsole(L"[info] current game time = %f", context.gameTime);
+
+        if (g_enableVisionSwitch)
+        {
+            PatchSignatureOpcode(
+                context,
+                VISION_SWITCH_SIGNATURE_CODE,
+                VISION_SWITCH_EXPECTED_OPCODE,
+                VISION_SWITCH_TARGET_OPCODE,
+                L"vision switch signature");
+        }
+        else
+        {
+            method::PrintToConsole(L"[info] vision switch disabled by config");
+        }
+
+        if (g_enableAttackRange)
+        {
+            PatchSignatureOpcode(
+                context,
+                ATTACK_RANGE_SIGNATURE_CODE,
+                ATTACK_RANGE_EXPECTED_OPCODE,
+                ATTACK_RANGE_TARGET_OPCODE,
+                L"attack range signature");
+        }
+        else
+        {
+            method::PrintToConsole(L"[info] attack range disabled by config");
+        }
     }
 
     VOID CALLBACK TimerCallback(PTP_CALLBACK_INSTANCE, PVOID, PTP_TIMER)
@@ -34,6 +112,11 @@ BOOL APIENTRY DllMain(HMODULE, DWORD ul_reason_for_call, LPVOID)
         {
             method::RedireceConsole();
         }
+
+        g_enableVisionSwitch =
+            method::GetIntPrivateProfile(L"Config", L"visionSwitch", 1) != 0;
+        g_enableAttackRange =
+            method::GetIntPrivateProfile(L"Config", L"attackRange", 1) != 0;
 
         g_timer = CreateThreadpoolTimer(TimerCallback, nullptr, nullptr);
         if (g_timer)

@@ -39,10 +39,16 @@ cmake --build --preset build-ninja-release
 ```ini
 [Config]
 console=0
+visionSwitch=1
+attackRange=1
 ```
 
 - `console=1`：DLL 加载后打开控制台
 - `console=0`：DLL 加载后不打开控制台
+- `visionSwitch=1`：启用视距功能补丁
+- `visionSwitch=0`：禁用视距功能补丁
+- `attackRange=1`：启用攻击距离功能补丁
+- `attackRange=0`：禁用攻击距离功能补丁
 
 ## 目录结构
 
