@@ -11,6 +11,7 @@ namespace
     bool g_enableVisionSwitch = true;
     bool g_enableAttackRange = true;
     bool g_enableAntiRecoil = true;
+    bool g_enableTowerRange = true;
 
     void PatchSignatureOpcode(
         const gametime::ReadyContext& context,
@@ -111,6 +112,20 @@ namespace
         {
             method::PrintToConsole(L"[info] anti recoil disabled by config");
         }
+
+        if (g_enableTowerRange)
+        {
+            PatchSignatureOpcode(
+                context,
+                TOWER_RANGE_SIGNATURE_CODE,
+                TOWER_RANGE_EXPECTED_OPCODE,
+                TOWER_RANGE_TARGET_OPCODE,
+                L"tower range signature");
+        }
+        else
+        {
+            method::PrintToConsole(L"[info] tower range disabled by config");
+        }
     }
 
     VOID CALLBACK TimerCallback(PTP_CALLBACK_INSTANCE, PVOID, PTP_TIMER)
@@ -141,6 +156,8 @@ BOOL APIENTRY DllMain(HMODULE, DWORD ul_reason_for_call, LPVOID)
             method::GetIntPrivateProfile(L"Config", L"attackRange", 1) != 0;
         g_enableAntiRecoil =
             method::GetIntPrivateProfile(L"Config", L"antiRecoil", 1) != 0;
+        g_enableTowerRange =
+            method::GetIntPrivateProfile(L"Config", L"towerRange", 1) != 0;
 
         g_timer = CreateThreadpoolTimer(TimerCallback, nullptr, nullptr);
         if (g_timer)

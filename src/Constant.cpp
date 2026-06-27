@@ -23,6 +23,11 @@ const char* const ANTI_RECOIL_RELEASE_END_SIGNATURE_CODE =
 const BYTE ANTI_RECOIL_RELEASE_END_EXPECTED_OPCODE = 0x77;
 const BYTE ANTI_RECOIL_RELEASE_END_TARGET_OPCODE = 0x76;
 
+const char* const TOWER_RANGE_SIGNATURE_CODE =
+    "75 ?? 85 C9 0F 85 ?? ?? ?? ?? E9 ?? ?? ?? ?? 85 C9 0F 84 ?? ?? ?? ?? 83 E9 01";
+const BYTE TOWER_RANGE_EXPECTED_OPCODE = 0x75;
+const BYTE TOWER_RANGE_TARGET_OPCODE = 0xEB;
+
 const wchar_t* const CONFIG_PATH = L".\\LolInfiniteVision.ini";
 
 const WCHAR APP_CODE[512] = L"[902] ";
