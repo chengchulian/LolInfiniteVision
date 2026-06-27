@@ -10,6 +10,7 @@ namespace
     PTP_TIMER g_timer = nullptr;
     bool g_enableVisionSwitch = true;
     bool g_enableAttackRange = true;
+    bool g_enableAntiRecoil = true;
 
     void PatchSignatureOpcode(
         const gametime::ReadyContext& context,
@@ -89,6 +90,27 @@ namespace
         {
             method::PrintToConsole(L"[info] attack range disabled by config");
         }
+
+        if (g_enableAntiRecoil)
+        {
+            PatchSignatureOpcode(
+                context,
+                ANTI_RECOIL_RELEASE_START_SIGNATURE_CODE,
+                ANTI_RECOIL_RELEASE_START_EXPECTED_OPCODE,
+                ANTI_RECOIL_RELEASE_START_TARGET_OPCODE,
+                L"anti recoil release start signature");
+
+            PatchSignatureOpcode(
+                context,
+                ANTI_RECOIL_RELEASE_END_SIGNATURE_CODE,
+                ANTI_RECOIL_RELEASE_END_EXPECTED_OPCODE,
+                ANTI_RECOIL_RELEASE_END_TARGET_OPCODE,
+                L"anti recoil release end signature");
+        }
+        else
+        {
+            method::PrintToConsole(L"[info] anti recoil disabled by config");
+        }
     }
 
     VOID CALLBACK TimerCallback(PTP_CALLBACK_INSTANCE, PVOID, PTP_TIMER)
@@ -115,8 +137,10 @@ BOOL APIENTRY DllMain(HMODULE, DWORD ul_reason_for_call, LPVOID)
 
         g_enableVisionSwitch =
             method::GetIntPrivateProfile(L"Config", L"visionSwitch", 1) != 0;
-        g_enableAttackRange =
+        g_enableAttackRange = 
             method::GetIntPrivateProfile(L"Config", L"attackRange", 1) != 0;
+        g_enableAntiRecoil =
+            method::GetIntPrivateProfile(L"Config", L"antiRecoil", 1) != 0;
 
         g_timer = CreateThreadpoolTimer(TimerCallback, nullptr, nullptr);
         if (g_timer)
