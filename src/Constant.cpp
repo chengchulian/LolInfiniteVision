@@ -9,7 +9,7 @@ const BYTE VISION_SWITCH_EXPECTED_OPCODE = 0x75;
 const BYTE VISION_SWITCH_TARGET_OPCODE = 0x74;
 
 const char* const ATTACK_RANGE_SIGNATURE_CODE =
-    "75 0F 83 79 50 03 75 04 84 DB";
+    "75 1A B8 ?? ?? ?? ?? 48 33 C8 83 ?? ?? ?? ?? ?? 03";
 const BYTE ATTACK_RANGE_EXPECTED_OPCODE = 0x75;
 const BYTE ATTACK_RANGE_TARGET_OPCODE = 0x74;
 
@@ -28,6 +28,6 @@ const char* const TOWER_RANGE_SIGNATURE_CODE =
 const BYTE TOWER_RANGE_EXPECTED_OPCODE = 0x75;
 const BYTE TOWER_RANGE_TARGET_OPCODE = 0xEB;
 
-const wchar_t* const CONFIG_PATH = L".\\LolInfiniteVision.ini";
+const wchar_t* const CONFIG_FILENAME = L"LolInfiniteVision.ini";
 
 const WCHAR APP_CODE[512] = L"[902] ";
