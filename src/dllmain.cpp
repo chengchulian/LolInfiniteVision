@@ -140,11 +140,12 @@ namespace
     }
 }
 
-BOOL APIENTRY DllMain(HMODULE, DWORD ul_reason_for_call, LPVOID)
+BOOL APIENTRY DllMain(HMODULE module, DWORD ul_reason_for_call, LPVOID)
 {
     switch (ul_reason_for_call)
     {
     case DLL_PROCESS_ATTACH:
+        method::InitializeConfigPath(module);
         if (method::GetIntPrivateProfile(L"Config", L"console", 0))
         {
             method::RedireceConsole();

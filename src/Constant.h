@@ -20,5 +20,5 @@ extern const BYTE ANTI_RECOIL_RELEASE_END_TARGET_OPCODE;
 extern const char* const TOWER_RANGE_SIGNATURE_CODE;
 extern const BYTE TOWER_RANGE_EXPECTED_OPCODE;
 extern const BYTE TOWER_RANGE_TARGET_OPCODE;
-extern const wchar_t* const CONFIG_PATH;
+extern const wchar_t* const CONFIG_FILENAME;
 extern const WCHAR APP_CODE[512];

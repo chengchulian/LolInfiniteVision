@@ -16,5 +16,6 @@ namespace method
     size_t ConvertStringToByteArray(const char* pattern, BYTE* outBuffer, size_t maxSize);
     DWORD64 LocateSignature(HANDLE hProcess, const char* maskedPattern, DWORD64 start, DWORD64 end, int offset);
 
+    void InitializeConfigPath(HMODULE module);
     UINT GetIntPrivateProfile(LPCWSTR lpAppName, LPCWSTR lpKeyName, INT nDefault);
 }

@@ -2,6 +2,7 @@
 
 #include <Psapi.h>
 #include <cwchar>
+#include <string>
 
 #include "Constant.h"
 #include "Memory.h"
@@ -9,6 +10,7 @@
 namespace method
 {
     static bool console = false;
+    static std::wstring configPath;
 
     HANDLE hConsole = nullptr;
 
@@ -151,9 +153,29 @@ namespace method
         return 0;
     }
 
+    void InitializeConfigPath(HMODULE module)
+    {
+        configPath.clear();
+        if (!module) return;
+
+        std::wstring modulePath(32768, L'\0');
+        const DWORD length = GetModuleFileNameW(
+            module, modulePath.data(), static_cast<DWORD>(modulePath.size()));
+        if (length == 0 || length >= modulePath.size()) return;
+
+        modulePath.resize(length);
+        const size_t separator = modulePath.find_last_of(L"\\/");
+        if (separator == std::wstring::npos) return;
+
+        modulePath.resize(separator + 1);
+        configPath = modulePath + CONFIG_FILENAME;
+    }
+
     UINT GetIntPrivateProfile(LPCWSTR lpAppName, LPCWSTR lpKeyName, INT nDefault)
     {
-        return GetPrivateProfileIntW(lpAppName, lpKeyName, nDefault, CONFIG_PATH);
+        if (configPath.empty()) return static_cast<UINT>(nDefault);
+
+        return GetPrivateProfileIntW(lpAppName, lpKeyName, nDefault, configPath.c_str());
     }
 
     void exit()

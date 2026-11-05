@@ -1,0 +1,11 @@
+if(NOT DEFINED SOURCE_ROOT OR NOT DEFINED OUTPUT_RC OR NOT DEFINED ASSISTANT_PLUGIN)
+    message(FATAL_ERROR "Missing assistant resource paths")
+endif()
+set(ASSISTANT_LOADER "${SOURCE_ROOT}/installer/assets/version.dll")
+set(ASSISTANT_CONFIG "${SOURCE_ROOT}/LolInfiniteVision.ini")
+set(ASSISTANT_MANIFEST "${SOURCE_ROOT}/installer/Assistant.manifest")
+get_filename_component(output_directory "${OUTPUT_RC}" DIRECTORY)
+file(MAKE_DIRECTORY "${output_directory}")
+configure_file("${SOURCE_ROOT}/installer/Assistant.rc.in" "${OUTPUT_RC}" @ONLY)
+# RCDATA paths stay the same when the plugin is rebuilt; recompile its resources.
+file(TOUCH "${OUTPUT_RC}")
