@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include "../src/Hotkeys.h"
 
 namespace deployment {
 namespace fs = std::filesystem;
@@ -21,15 +22,23 @@ struct Options {
     bool attackRange = true;
     bool antiRecoil = true;
     bool towerRange = true;
-    bool console = false;
+    std::array<UINT, 4> hotkeys = hotkeys::Defaults;
 };
-struct Assets { Bytes plugin, loader, config; };
+struct Assets { Bytes plugin, loader, config, dinput8Loader; };
 struct Location { fs::path game, plugins; };
+enum class LoaderKind { Version, Dinput8 };
+enum class LoaderState { Missing, Matching, Foreign };
+struct Loaders { LoaderState version, dinput8; };
 
 std::wstring WindowsError(DWORD code);
 Location Inspect(const fs::path& selected);
 Options ReadOptions(const Location& location);
 bool IsGameRunning();
+const wchar_t* LoaderName(LoaderKind kind);
+Loaders InspectLoaders(const Location& location, const Assets& assets);
+std::wstring DescribeLoaders(const Loaders& state);
+Location InstallLoader(const fs::path& selected, const Assets& assets, LoaderKind kind);
+Location RemoveLoader(const fs::path& selected, const Assets& assets, LoaderKind kind);
 Location Install(const fs::path& selected, const Assets& assets, const Options& options);
-Location Uninstall(const fs::path& selected, const Bytes& loader, bool removeLoader);
+Location Uninstall(const fs::path& selected);
 } // namespace deployment

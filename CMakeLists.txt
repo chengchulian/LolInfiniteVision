@@ -11,6 +11,18 @@ include(CTest)
 add_library(LolInfiniteVision SHARED
     src/Constant.cpp
     src/Constant.h
+    src/FeatureControls.cpp
+    src/FeatureControls.h
+    src/Hotkeys.h
+    src/OpcodePatch.cpp
+    src/OpcodePatch.h
+    src/AttackRange.cpp
+    src/AttackRange.h
+    src/AttackRangeSignatures.h
+    src/NativeOverlayBindings.cpp
+    src/NativeOverlayBindings.h
+    src/OverlayEventPump.cpp
+    src/OverlayEventPump.h
     src/dllmain.cpp
     src/GameTime.cpp
     src/GameTime.h
@@ -36,7 +48,7 @@ target_include_directories(LolInfiniteVision
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_link_libraries(LolInfiniteVision PRIVATE psapi)
+target_link_libraries(LolInfiniteVision PRIVATE psapi user32)
 
 add_custom_command(TARGET LolInfiniteVision POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -58,7 +70,7 @@ add_custom_command(OUTPUT "${assistant_rc}"
         "-DASSISTANT_PLUGIN=$<TARGET_FILE:LolInfiniteVision>"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tools/GenerateAssistantResource.cmake"
     DEPENDS LolInfiniteVision installer/Assistant.rc.in installer/Assistant.manifest
-        installer/resource.h installer/assets/version.dll LolInfiniteVision.ini
+        installer/resource.h installer/assets/version.dll installer/assets/dinput8.dll LolInfiniteVision.ini
         tools/GenerateAssistantResource.cmake
     VERBATIM)
 add_executable(LolInfiniteVisionAssistant WIN32 installer/Assistant.cpp "${assistant_rc}")
@@ -66,6 +78,25 @@ target_link_libraries(LolInfiniteVisionAssistant PRIVATE VisionDeployment comctl
 target_link_options(LolInfiniteVisionAssistant PRIVATE /MANIFEST:NO)
 
 if(BUILD_TESTING)
+    add_executable(OpcodePatchTests tests/OpcodePatchTests.cpp src/OpcodePatch.cpp src/Memory.cpp
+        src/Method.cpp src/Constant.cpp)
+    target_compile_features(OpcodePatchTests PRIVATE cxx_std_17)
+    target_include_directories(OpcodePatchTests PRIVATE src)
+    target_compile_definitions(OpcodePatchTests PRIVATE UNICODE _UNICODE)
+    target_link_libraries(OpcodePatchTests PRIVATE psapi user32)
+    add_test(NAME reversible-feature-patches COMMAND OpcodePatchTests)
+    add_executable(HotkeyTests tests/HotkeyTests.cpp)
+    target_compile_features(HotkeyTests PRIVATE cxx_std_17)
+    target_include_directories(HotkeyTests PRIVATE src)
+    add_test(NAME in-game-hotkeys COMMAND HotkeyTests)
+    add_executable(AttackRangeTests tests/AttackRangeTests.cpp src/AttackRange.cpp
+        src/NativeOverlayBindings.cpp src/OverlayEventPump.cpp)
+    target_compile_features(AttackRangeTests PRIVATE cxx_std_17)
+    target_include_directories(AttackRangeTests PRIVATE src)
+    target_compile_definitions(AttackRangeTests PRIVATE UNICODE _UNICODE)
+    target_link_libraries(AttackRangeTests PRIVATE user32)
+    add_test(NAME native-attack-range-offline COMMAND AttackRangeTests)
+    set_tests_properties(native-attack-range-offline PROPERTIES TIMEOUT 15)
     add_executable(DeploymentTests tests/DeploymentTests.cpp)
     target_link_libraries(DeploymentTests PRIVATE VisionDeployment)
     add_test(NAME plugin-deployment COMMAND DeploymentTests)
@@ -82,7 +113,7 @@ if(BUILD_TESTING)
 endif()
 
 if(MSVC)
-    foreach(target VisionDeployment LolInfiniteVisionAssistant DeploymentTests)
+    foreach(target VisionDeployment LolInfiniteVisionAssistant DeploymentTests AttackRangeTests HotkeyTests OpcodePatchTests)
         if(TARGET ${target})
             target_compile_options(${target} PRIVATE /utf-8 /W4 /permissive- /sdl)
             set_property(TARGET ${target} PROPERTY MSVC_RUNTIME_LIBRARY

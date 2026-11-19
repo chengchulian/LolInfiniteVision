@@ -15,6 +15,13 @@ namespace fs = std::filesystem;
 HINSTANCE g_instance = nullptr;
 HFONT g_headingFont = nullptr;
 bool g_smoke = false;
+constexpr std::array<int, 4> kHotkeyControls{
+    IDC_HOTKEY_VISION, IDC_HOTKEY_ATTACK_RANGE, IDC_HOTKEY_ANTI_RECOIL, IDC_HOTKEY_TOWER_RANGE};
+
+void SetHotkeys(HWND dialog, const std::array<UINT, 4>& bindings) {
+    for (size_t i = 0; i < bindings.size(); ++i)
+        SendDlgItemMessageW(dialog, kHotkeyControls[i], HKM_SETHOTKEY, bindings[i], 0);
+}
 
 deployment::Bytes Resource(int identifier) {
     const auto resource = FindResourceW(g_instance, MAKEINTRESOURCEW(identifier), RT_RCDATA);
@@ -26,8 +33,10 @@ deployment::Bytes Resource(int identifier) {
     return {data, data + size};
 }
 
-deployment::Assets Assets() {
-    return {Resource(IDR_PLUGIN), Resource(IDR_LOADER), Resource(IDR_CONFIG)};
+const deployment::Assets& Assets() {
+    static const deployment::Assets assets{
+        Resource(IDR_PLUGIN), Resource(IDR_LOADER), Resource(IDR_CONFIG), Resource(IDR_DINPUT8_LOADER)};
+    return assets;
 }
 
 std::wstring PathText(HWND dialog) {
@@ -43,6 +52,37 @@ void Status(HWND dialog, const std::wstring& text) {
     SetDlgItemTextW(dialog, IDC_STATUS, text.c_str());
 }
 
+deployment::LoaderKind SelectedLoader(HWND dialog) {
+    return IsDlgButtonChecked(dialog, IDC_LOADER_DINPUT8) == BST_CHECKED
+        ? deployment::LoaderKind::Dinput8 : deployment::LoaderKind::Version;
+}
+
+void RefreshLoaders(HWND dialog, bool selectDetected = false) {
+    try {
+        const auto path = PathText(dialog);
+        if (path.empty()) throw deployment::Error(L"请选择游戏目录以检测当前加载器。");
+        const auto state = deployment::InspectLoaders(deployment::Inspect(path), Assets());
+        const auto text = deployment::DescribeLoaders(state);
+        SetDlgItemTextW(dialog, IDC_LOADER_STATUS, text.c_str());
+        if (selectDetected) {
+            const bool dinput8 = state.dinput8 == deployment::LoaderState::Matching ||
+                (state.version == deployment::LoaderState::Foreign && state.dinput8 == deployment::LoaderState::Missing);
+            CheckRadioButton(dialog, IDC_LOADER_VERSION, IDC_LOADER_DINPUT8,
+                dinput8 ? IDC_LOADER_DINPUT8 : IDC_LOADER_VERSION);
+        }
+        EnableWindow(GetDlgItem(dialog, IDC_INSTALL_LOADER), TRUE);
+        EnableWindow(GetDlgItem(dialog, IDC_CLEAN_LOADER), TRUE);
+    } catch (const deployment::Error& error) {
+        SetDlgItemTextW(dialog, IDC_LOADER_STATUS, error.message.c_str());
+        EnableWindow(GetDlgItem(dialog, IDC_INSTALL_LOADER), FALSE);
+        EnableWindow(GetDlgItem(dialog, IDC_CLEAN_LOADER), FALSE);
+    } catch (const std::exception&) {
+        SetDlgItemTextW(dialog, IDC_LOADER_STATUS, L"加载器检测失败，请检查目录和文件权限。");
+        EnableWindow(GetDlgItem(dialog, IDC_INSTALL_LOADER), FALSE);
+        EnableWindow(GetDlgItem(dialog, IDC_CLEAN_LOADER), FALSE);
+    }
+}
+
 void ChooseLocation(HWND dialog, const fs::path& selected) {
     const auto location = deployment::Inspect(selected);
     SetDlgItemTextW(dialog, IDC_GAME_PATH, location.game.c_str());
@@ -51,7 +91,8 @@ void ChooseLocation(HWND dialog, const fs::path& selected) {
     CheckDlgButton(dialog, IDC_ATTACK_RANGE, options.attackRange ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(dialog, IDC_ANTI_RECOIL, options.antiRecoil ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(dialog, IDC_TOWER_RANGE, options.towerRange ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(dialog, IDC_CONSOLE, options.console ? BST_CHECKED : BST_UNCHECKED);
+    SetHotkeys(dialog, options.hotkeys);
+    RefreshLoaders(dialog, true);
     Status(dialog, L"已选择游戏目录。游戏大厅点击“写入视距插件”。");
 }
 
@@ -125,17 +166,20 @@ void Install(HWND dialog) {
         throw deployment::Error(L"游戏正在运行。请先退出当前对局并关闭游戏进程，再写入插件。");
     EnableWindow(GetDlgItem(dialog, IDC_INSTALL), FALSE);
     Status(dialog, L"正在写入视距插件…");
-    const deployment::Options options{
+    deployment::Options options{
         IsDlgButtonChecked(dialog, IDC_VISION) == BST_CHECKED,
         IsDlgButtonChecked(dialog, IDC_ATTACK_RANGE) == BST_CHECKED,
         IsDlgButtonChecked(dialog, IDC_ANTI_RECOIL) == BST_CHECKED,
-        IsDlgButtonChecked(dialog, IDC_TOWER_RANGE) == BST_CHECKED,
-        IsDlgButtonChecked(dialog, IDC_CONSOLE) == BST_CHECKED
+        IsDlgButtonChecked(dialog, IDC_TOWER_RANGE) == BST_CHECKED
     };
+    for (size_t i = 0; i < options.hotkeys.size(); ++i)
+        options.hotkeys[i] = hotkeys::Normalize(static_cast<UINT>(SendDlgItemMessageW(
+            dialog, kHotkeyControls[i], HKM_GETHOTKEY, 0, 0)));
     try {
         const auto location = deployment::Install(PathText(dialog), Assets(), options);
         SetDlgItemTextW(dialog, IDC_GAME_PATH, location.game.c_str());
-        Status(dialog, L"写入完成。下次进入对局时加载；修改配置后请重新进入游戏。");
+        RefreshLoaders(dialog);
+        Status(dialog, L"视距插件已写入。" + deployment::DescribeLoaders(deployment::InspectLoaders(location, Assets())));
     } catch (...) {
         EnableWindow(GetDlgItem(dialog, IDC_INSTALL), TRUE);
         throw;
@@ -143,21 +187,36 @@ void Install(HWND dialog) {
     EnableWindow(GetDlgItem(dialog, IDC_INSTALL), TRUE);
 }
 
-void Cleanup(HWND dialog, bool removeLoader) {
-    const auto location = deployment::Uninstall(PathText(dialog), Resource(IDR_LOADER), removeLoader);
+void Cleanup(HWND dialog) {
+    const auto location = deployment::Uninstall(PathText(dialog));
     SetDlgItemTextW(dialog, IDC_GAME_PATH, location.game.c_str());
-    Status(dialog, removeLoader ? L"清理完成。已移除无限视距插件、配置和注入器。"
-                                : L"清理完成。已移除无限视距插件和配置，保留注入器。");
+    RefreshLoaders(dialog);
+    Status(dialog, L"清理完成。已移除无限视距插件和配置。");
+}
+
+void ChangeLoader(HWND dialog, bool remove) {
+    const auto kind = SelectedLoader(dialog);
+    const auto location = remove ? deployment::RemoveLoader(PathText(dialog), Assets(), kind)
+                                 : deployment::InstallLoader(PathText(dialog), Assets(), kind);
+    SetDlgItemTextW(dialog, IDC_GAME_PATH, location.game.c_str());
+    RefreshLoaders(dialog);
+    Status(dialog, std::wstring(remove ? L"已清理所选加载器。" : L"所选加载器已写入。") +
+        deployment::DescribeLoaders(deployment::InspectLoaders(location, Assets())));
 }
 
 INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wparam, LPARAM) {
     try {
         switch (message) {
         case WM_INITDIALOG: {
+            CheckRadioButton(dialog, IDC_LOADER_VERSION, IDC_LOADER_DINPUT8, IDC_LOADER_VERSION);
+            RefreshLoaders(dialog);
             SendDlgItemMessageW(dialog, IDC_GAME_PATH, EM_SETCUEBANNER, FALSE,
                 reinterpret_cast<LPARAM>(L"选择 Game 目录或其上一级安装目录"));
             for (const auto id : {IDC_VISION, IDC_ATTACK_RANGE, IDC_ANTI_RECOIL, IDC_TOWER_RANGE})
                 CheckDlgButton(dialog, id, BST_CHECKED);
+            for (const auto id : kHotkeyControls)
+                SendDlgItemMessageW(dialog, id, HKM_SETRULES, 0, 0);
+            SetHotkeys(dialog, hotkeys::Defaults);
             LOGFONTW font{};
             const auto original = reinterpret_cast<HFONT>(SendMessageW(dialog, WM_GETFONT, 0, 0));
             if (GetObjectW(original, sizeof(font), &font)) {
@@ -169,15 +228,47 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wparam, LPARAM) {
             if (g_smoke) {
                 Assets();
                 for (const auto id : {IDC_VISION, IDC_ATTACK_RANGE, IDC_ANTI_RECOIL, IDC_TOWER_RANGE,
-                                      IDC_CONSOLE, IDC_INSTALL, IDC_CLEAN_PLUGIN, IDC_CLEAN_ALL}) {
+                                      IDC_HOTKEY_VISION, IDC_HOTKEY_ATTACK_RANGE, IDC_HOTKEY_ANTI_RECOIL,
+                                      IDC_HOTKEY_TOWER_RANGE, IDC_INSTALL, IDC_CLEAN_PLUGIN,
+                                      IDC_LOADER_VERSION, IDC_LOADER_DINPUT8, IDC_LOADER_STATUS,
+                                      IDC_INSTALL_LOADER, IDC_CLEAN_LOADER}) {
                     if (!GetDlgItem(dialog, id))
                         throw deployment::Error(L"界面控件缺失，请重新构建无限视距助手。");
                 }
+                if (GetDlgItem(dialog, 107))
+                    throw deployment::Error(L"开发者配置不应出现在界面中。");
+                for (size_t i = 0; i < kHotkeyControls.size(); ++i) {
+                    if (SendDlgItemMessageW(dialog, kHotkeyControls[i], HKM_GETHOTKEY, 0, 0) != hotkeys::Defaults[i])
+                        throw deployment::Error(L"快捷键控件初始化失败。");
+                }
+                const auto capture = GetDlgItem(dialog, IDC_HOTKEY_VISION);
+                SendMessageW(capture, WM_KEYDOWN, VK_F10, 0);
+                SendMessageW(capture, WM_KEYUP, VK_F10, 0);
+                if (SendMessageW(capture, HKM_GETHOTKEY, 0, 0) != VK_F10)
+                    throw deployment::Error(L"快捷键按键捕获失败。");
+                SendMessageW(capture, WM_KEYDOWN, VK_BACK, 0);
+                SendMessageW(capture, WM_KEYUP, VK_BACK, 0);
+                if (SendMessageW(capture, HKM_GETHOTKEY, 0, 0) != 0)
+                    throw deployment::Error(L"快捷键清空失败。");
+                BYTE savedKeyboard[256]{};
+                if (!GetKeyboardState(savedKeyboard)) throw deployment::Error(L"无法读取按键状态。");
+                BYTE chordKeyboard[256]{};
+                chordKeyboard[VK_CONTROL] = chordKeyboard[VK_LCONTROL] = 0x80;
+                SetKeyboardState(chordKeyboard);
+                SendMessageW(capture, WM_KEYDOWN, VK_CONTROL, 0);
+                SendMessageW(capture, WM_KEYDOWN, VK_F11, 0);
+                SendMessageW(capture, WM_KEYUP, VK_F11, 0);
+                const auto chord = SendMessageW(capture, HKM_GETHOTKEY, 0, 0);
+                SetKeyboardState(savedKeyboard);
+                SendMessageW(capture, WM_KEYUP, VK_CONTROL, 0);
+                if (chord != (VK_F11 | (HOTKEYF_CONTROL << 8)))
+                    throw deployment::Error(L"组合快捷键捕获失败。");
                 SetTimer(dialog, 1, 200, nullptr);
             } else {
                 const auto detected = Detect();
                 if (!detected.empty())
                     ChooseLocation(dialog, detected);
+                SetTimer(dialog, 2, 2000, nullptr);
             }
             return TRUE;
         }
@@ -193,8 +284,12 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wparam, LPARAM) {
                 return TRUE;
             }
             case IDC_INSTALL: Install(dialog); return TRUE;
-            case IDC_CLEAN_PLUGIN: Cleanup(dialog, false); return TRUE;
-            case IDC_CLEAN_ALL: Cleanup(dialog, true); return TRUE;
+            case IDC_CLEAN_PLUGIN: Cleanup(dialog); return TRUE;
+            case IDC_INSTALL_LOADER: ChangeLoader(dialog, false); return TRUE;
+            case IDC_CLEAN_LOADER: ChangeLoader(dialog, true); return TRUE;
+            case IDC_GAME_PATH:
+                if (HIWORD(wparam) == EN_CHANGE) RefreshLoaders(dialog);
+                return TRUE;
             case IDC_OPEN_FOLDER: {
                 const auto location = deployment::Inspect(PathText(dialog));
                 const auto directory = fs::exists(location.plugins) ? location.plugins : location.game;
@@ -209,6 +304,7 @@ INT_PTR CALLBACK DialogProc(HWND dialog, UINT message, WPARAM wparam, LPARAM) {
             break;
         case WM_TIMER:
             if (g_smoke) { DestroyWindow(dialog); return TRUE; }
+            if (wparam == 2) { RefreshLoaders(dialog); return TRUE; }
             break;
         case WM_CLOSE: DestroyWindow(dialog); return TRUE;
         case WM_DESTROY:
@@ -236,22 +332,33 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     if (!arguments)
         return 1;
     const bool install = count >= 2 && std::wstring(arguments[1]) == L"--install";
+    const bool installLoader = count >= 2 && std::wstring(arguments[1]) == L"--install-loader";
+    const bool removeLoader = count >= 2 && std::wstring(arguments[1]) == L"--remove-loader";
     g_smoke = count >= 2 && std::wstring(arguments[1]) == L"--smoke-test";
-    const fs::path target = install && count >= 3 ? arguments[2] : L"";
+    const fs::path target = (install || installLoader || removeLoader) && count >= 3 ? arguments[2] : L"";
+    const std::wstring loaderName = (installLoader || removeLoader) && count >= 4 ? arguments[3] : L"";
     LocalFree(arguments);
-    if (install) {
+    if (install || installLoader || removeLoader) {
         try {
             if (target.empty() || deployment::IsGameRunning())
                 throw deployment::Error(L"目录为空或游戏正在运行。");
-            const auto location = deployment::Install(target, Assets(),
-                deployment::ReadOptions(deployment::Inspect(target)));
+            deployment::Location location;
+            if (install) {
+                location = deployment::Install(target, Assets(), deployment::ReadOptions(deployment::Inspect(target)));
+            } else {
+                if (loaderName != L"version" && loaderName != L"dinput8")
+                    throw deployment::Error(L"请选择 version 或 dinput8 加载器。");
+                const auto kind = loaderName == L"version" ? deployment::LoaderKind::Version : deployment::LoaderKind::Dinput8;
+                location = installLoader ? deployment::InstallLoader(target, Assets(), kind)
+                                         : deployment::RemoveLoader(target, Assets(), kind);
+            }
             std::wcout << location.plugins.wstring() << L'\n';
             return 0;
         } catch (const deployment::Error& error) { std::wcerr << error.message << L'\n'; return 1; }
         catch (const std::exception&) { return 1; }
     }
     const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES};
+    INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES | ICC_HOTKEY_CLASS};
     InitCommonControlsEx(&controls);
     const auto dialog = CreateDialogParamW(instance, MAKEINTRESOURCEW(IDD_ASSISTANT), nullptr, DialogProc, 0);
     if (!dialog) { if (SUCCEEDED(com)) CoUninitialize(); return 1; }

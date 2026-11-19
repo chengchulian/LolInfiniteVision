@@ -2,6 +2,7 @@ if(NOT DEFINED SOURCE_ROOT OR NOT DEFINED OUTPUT_RC OR NOT DEFINED ASSISTANT_PLU
     message(FATAL_ERROR "Missing assistant resource paths")
 endif()
 set(ASSISTANT_LOADER "${SOURCE_ROOT}/installer/assets/version.dll")
+set(ASSISTANT_DINPUT8_LOADER "${SOURCE_ROOT}/installer/assets/dinput8.dll")
 set(ASSISTANT_CONFIG "${SOURCE_ROOT}/LolInfiniteVision.ini")
 set(ASSISTANT_MANIFEST "${SOURCE_ROOT}/installer/Assistant.manifest")
 get_filename_component(output_directory "${OUTPUT_RC}" DIRECTORY)

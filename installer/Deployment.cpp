@@ -101,6 +101,7 @@ Location Inspect(const fs::path& selected) {
         Fail(L"所选目录中没有 League of Legends.exe。请选择 Game 目录或其上一级安装目录。");
 
     OrdinaryPath(game / L"version.dll", false);
+    OrdinaryPath(game / L"dinput8.dll", false);
     OrdinaryPath(game / L"load.ini", false);
     wchar_t loadPath[32768]{};
     const auto count = GetPrivateProfileStringW(L"Config", L"LoadPath", L"load", loadPath,
@@ -140,7 +141,10 @@ Options ReadOptions(const Location& location) {
         GetPrivateProfileIntW(L"Config", L"attackRange", 1, config.c_str()) != 0,
         GetPrivateProfileIntW(L"Config", L"antiRecoil", 1, config.c_str()) != 0,
         GetPrivateProfileIntW(L"Config", L"towerRange", 1, config.c_str()) != 0,
-        GetPrivateProfileIntW(L"Config", L"console", 0, config.c_str()) != 0
+        {hotkeys::Normalize(GetPrivateProfileIntW(L"Hotkeys", L"visionSwitch", hotkeys::Defaults[0], config.c_str())),
+         hotkeys::Normalize(GetPrivateProfileIntW(L"Hotkeys", L"attackRange", hotkeys::Defaults[1], config.c_str())),
+         hotkeys::Normalize(GetPrivateProfileIntW(L"Hotkeys", L"antiRecoil", hotkeys::Defaults[2], config.c_str())),
+         hotkeys::Normalize(GetPrivateProfileIntW(L"Hotkeys", L"towerRange", hotkeys::Defaults[3], config.c_str()))}
     };
 }
 
@@ -164,15 +168,13 @@ bool IsGameRunning() {
 }
 
 Location Install(const fs::path& selected, const Assets& assets, const Options& options) {
+    if (!hotkeys::Unique(options.hotkeys))
+        Fail(L"快捷键重复，请为各功能设置不同的快捷键，或清空以禁用快捷键。");
     if (IsGameRunning())
         Fail(L"游戏正在运行，请退出游戏进程后再写入插件。");
     const auto location = Inspect(selected);
-    if (!IsPe64(assets.plugin) || !IsPe64(assets.loader) || assets.config.empty())
+    if (!IsPe64(assets.plugin) || assets.config.empty())
         Fail(L"内嵌插件资源无效，请重新构建程序。");
-    const auto loader = location.game / L"version.dll";
-    const bool reuseLoader = Exists(loader);
-    if (reuseLoader && ReadFileBytes(loader) != assets.loader)
-        Fail(L"游戏目录已存在不同的 version.dll，未覆盖任何文件。请先确认该加载器的来源和兼容性。");
 
     std::vector<Change> changes;
     for (const auto& item : std::vector<std::pair<fs::path, Bytes>>{
@@ -187,12 +189,6 @@ Location Install(const fs::path& selected, const Assets& assets, const Options& 
         if (change.target.filename() == L"LolInfiniteVision.ini" && change.existed)
             change.payload = change.previous;
         changes.push_back(std::move(change));
-    }
-    if (!reuseLoader) {
-        Change change;
-        change.target = loader;
-        change.payload = assets.loader;
-        changes.push_back(std::move(change)); // Install the loader after the plugin is ready.
     }
 
     std::error_code error;
@@ -219,11 +215,15 @@ Location Install(const fs::path& selected, const Assets& assets, const Options& 
                 for (const auto& field : {std::pair{L"visionSwitch", options.visionSwitch},
                                          std::pair{L"attackRange", options.attackRange},
                                          std::pair{L"antiRecoil", options.antiRecoil},
-                                         std::pair{L"towerRange", options.towerRange},
-                                         std::pair{L"console", options.console}}) {
+                                         std::pair{L"towerRange", options.towerRange}}) {
                     if (!WritePrivateProfileStringW(L"Config", field.first, field.second ? L"1" : L"0",
                                                    change.staged.c_str()))
                         Fail(L"无法写入无限视距助手配置。", GetLastError());
+                }
+                for (size_t i = 0; i < options.hotkeys.size(); ++i) {
+                    const auto value = std::to_wstring(hotkeys::Normalize(options.hotkeys[i]));
+                    if (!WritePrivateProfileStringW(L"Hotkeys", hotkeys::Names[i], value.c_str(), change.staged.c_str()))
+                        Fail(L"无法写入快捷键配置。", GetLastError());
                 }
                 WritePrivateProfileStringW(nullptr, nullptr, nullptr, change.staged.c_str());
             }
@@ -260,33 +260,15 @@ Location Install(const fs::path& selected, const Assets& assets, const Options& 
     return location;
 }
 
-Location Uninstall(const fs::path& selected, const Bytes& loader, bool removeLoader) {
-    if (IsGameRunning())
-        Fail(L"游戏正在运行，请退出游戏进程后再清理。");
-    const auto location = Inspect(selected);
-    const auto loaderPath = location.game / L"version.dll";
-    if (removeLoader && Exists(loaderPath)) {
-        if (!IsPe64(loader) || ReadFileBytes(loaderPath) != loader)
-            Fail(L"现有 version.dll 与本助手的加载器不同，无法清理。可使用“清理插件”保留该文件。");
-        if (Exists(location.plugins)) {
-            for (const auto& item : fs::directory_iterator(location.plugins)) {
-                if (_wcsicmp(item.path().extension().c_str(), L".dll") == 0 &&
-                    _wcsicmp(item.path().filename().c_str(), L"LolInfiniteVision.dll") != 0)
-                    Fail(L"插件目录中还有其他 DLL，可能共用加载器。请使用“清理插件”，或先清理其他插件。");
-            }
-        }
-    }
-
+namespace {
+void RemoveFiles(const Location& location, const std::vector<fs::path>& paths) {
     std::vector<std::pair<fs::path, fs::path>> changes;
-    for (const auto& path : {location.plugins / L"LolInfiniteVision.dll",
-                            location.plugins / L"LolInfiniteVision.ini"}) {
+    for (const auto& path : paths) {
         if (Exists(path))
             changes.emplace_back(path, fs::path{});
     }
-    if (removeLoader && Exists(loaderPath))
-        changes.emplace_back(loaderPath, fs::path{});
     if (changes.empty())
-        return location;
+        return;
 
     const auto stage = location.game / (L".LolInfiniteVision-cleanup-" + std::to_wstring(GetCurrentProcessId()) +
         L"-" + std::to_wstring(GetTickCount64()));
@@ -319,6 +301,103 @@ Location Uninstall(const fs::path& selected, const Bytes& loader, bool removeLoa
             Fail(L"文件已移出插件目录，但无法删除暂存文件：" + change.second.wstring(), GetLastError());
     }
     fs::remove(stage, error);
+}
+
+const Bytes& LoaderBytes(const Assets& assets, LoaderKind kind) {
+    return kind == LoaderKind::Dinput8 ? assets.dinput8Loader : assets.loader;
+}
+
+LoaderState InspectLoader(const fs::path& path, const Bytes& expected) {
+    OrdinaryPath(path, false);
+    if (!Exists(path)) return LoaderState::Missing;
+    std::error_code error;
+    const auto size = fs::file_size(path, error);
+    if (error) Fail(L"无法读取文件：" + path.wstring());
+    if (!IsPe64(expected) || size != expected.size()) return LoaderState::Foreign;
+    return ReadFileBytes(path) == expected ? LoaderState::Matching : LoaderState::Foreign;
+}
+}
+
+const wchar_t* LoaderName(LoaderKind kind) {
+    return kind == LoaderKind::Dinput8 ? L"dinput8.dll" : L"version.dll";
+}
+
+Loaders InspectLoaders(const Location& location, const Assets& assets) {
+    return {InspectLoader(location.game / L"version.dll", assets.loader),
+        InspectLoader(location.game / L"dinput8.dll", assets.dinput8Loader)};
+}
+
+std::wstring DescribeLoaders(const Loaders& state) {
+    std::wstring text;
+    if (state.version == LoaderState::Matching && state.dinput8 == LoaderState::Matching)
+        text = L"存在多个加载器：version.dll、dinput8.dll。请仅保留一个加载器。";
+    else if (state.version == LoaderState::Matching || state.dinput8 == LoaderState::Matching)
+        text = std::wstring(L"当前加载器：") + (state.version == LoaderState::Matching ? L"version.dll" : L"dinput8.dll");
+    else
+        text = L"当前加载器：无加载器，视距插件不生效。";
+    if (state.version == LoaderState::Foreign)
+        text += L"\r\nversion.dll 加载器已被其他 DLL 占用（已跳过）";
+    if (state.dinput8 == LoaderState::Foreign)
+        text += L"\r\ndinput8.dll 加载器已被其他 DLL 占用（已跳过）";
+    return text;
+}
+
+Location InstallLoader(const fs::path& selected, const Assets& assets, LoaderKind kind) {
+    if (IsGameRunning()) Fail(L"游戏正在运行，请退出游戏进程后再写入加载器。");
+    const auto location = Inspect(selected);
+    const auto& bytes = LoaderBytes(assets, kind);
+    if (!IsPe64(bytes)) Fail(L"内嵌加载器资源无效，请重新构建程序。");
+    const auto target = location.game / LoaderName(kind);
+    const auto current = InspectLoader(target, bytes);
+    if (current == LoaderState::Foreign)
+        Fail(std::wstring(LoaderName(kind)) + L" 加载器已被其他 DLL 占用，已跳过写入。");
+    if (current == LoaderState::Matching) return location;
+    const auto other = location.game / LoaderName(kind == LoaderKind::Version ? LoaderKind::Dinput8 : LoaderKind::Version);
+    const auto otherKind = kind == LoaderKind::Version ? LoaderKind::Dinput8 : LoaderKind::Version;
+    if (InspectLoader(other, LoaderBytes(assets, otherKind)) == LoaderState::Matching)
+        Fail(L"目录中已存在另一种本项目加载器。请先清理另一种加载器，再写入所选加载器，避免重复加载。");
+    const auto stage = location.game / (L".LolInfiniteVision-loader-" + std::to_wstring(GetCurrentProcessId()) +
+        L"-" + std::to_wstring(GetTickCount64()));
+    std::error_code error;
+    if (!fs::create_directory(stage, error) || error) Fail(L"无法创建加载器暂存目录。");
+    const auto staged = stage / LoaderName(kind);
+    try {
+        WriteFileBytes(staged, bytes);
+        OrdinaryPath(target, false);
+        // Never replace a file created by another application after inspection.
+        if (!MoveFileExW(staged.c_str(), target.c_str(), MOVEFILE_WRITE_THROUGH))
+            Fail(L"无法写入加载器。", GetLastError());
+    } catch (...) {
+        fs::remove(staged, error);
+        fs::remove(stage, error);
+        throw;
+    }
+    fs::remove(stage, error);
+    return location;
+}
+
+Location RemoveLoader(const fs::path& selected, const Assets& assets, LoaderKind kind) {
+    if (IsGameRunning()) Fail(L"游戏正在运行，请退出游戏进程后再清理加载器。");
+    const auto location = Inspect(selected);
+    const auto target = location.game / LoaderName(kind);
+    const auto state = InspectLoader(target, LoaderBytes(assets, kind));
+    if (state == LoaderState::Missing) return location;
+    if (state != LoaderState::Matching) Fail(std::wstring(LoaderName(kind)) + L" 加载器已被其他 DLL 占用，已跳过清理。");
+    if (Exists(location.plugins)) {
+        for (const auto& item : fs::directory_iterator(location.plugins)) {
+            if (_wcsicmp(item.path().extension().c_str(), L".dll") == 0 &&
+                _wcsicmp(item.path().filename().c_str(), L"LolInfiniteVision.dll") != 0)
+                Fail(L"插件目录中还有其他 DLL，可能共用加载器。请先处理其他插件，再清理加载器。");
+        }
+    }
+    RemoveFiles(location, {target});
+    return location;
+}
+
+Location Uninstall(const fs::path& selected) {
+    if (IsGameRunning()) Fail(L"游戏正在运行，请退出游戏进程后再清理插件。");
+    const auto location = Inspect(selected);
+    RemoveFiles(location, {location.plugins / L"LolInfiniteVision.dll", location.plugins / L"LolInfiniteVision.ini"});
     return location;
 }
 } // namespace deployment
