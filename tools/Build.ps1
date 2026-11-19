@@ -38,6 +38,7 @@ $distribution = Join-Path $root "dist\$Configuration"
 Copy-Item -LiteralPath (Join-Path $build "$Configuration\LolInfiniteVision.dll") -Destination $distribution -Force
 Copy-Item -LiteralPath (Join-Path $root 'LolInfiniteVision.ini') -Destination $distribution -Force
 Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination $distribution -Force
+Copy-Item -LiteralPath (Join-Path $root 'docs') -Destination $distribution -Recurse -Force
 $assistantName = (-join [char[]](0x65E0, 0x9650, 0x89C6, 0x8DDD, 0x52A9, 0x624B)) + '.exe'
 Copy-Item -LiteralPath (Join-Path $build "$Configuration\LolInfiniteVisionAssistant.exe") -Destination (Join-Path $distribution $assistantName) -Force
 Copy-Item -LiteralPath (Join-Path $distribution $assistantName) -Destination (Join-Path $root "dist\$assistantName") -Force
